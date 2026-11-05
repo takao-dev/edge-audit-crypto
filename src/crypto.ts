@@ -139,3 +139,46 @@ export function generateRandomToken(bytes = 32): string {
   crypto.getRandomValues(array);
   return Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * Computes a deterministic, salted HMAC-SHA256 blind index for searchable field-level encryption.
+ * Allows exact-match database queries (e.g., WHERE email_bindex = ?) without exposing plaintext.
+ */
+export async function computeBlindIndex(
+  plainText: string | null | undefined,
+  secretKeyBase64: string
+): Promise<string | null | undefined> {
+  if (!plainText) return plainText;
+  const normalized = plainText.trim().toLowerCase();
+  const keyBuffer = base64ToUint8Array(secretKeyBase64);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBuffer,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    cryptoKey,
+    new TextEncoder().encode(normalized)
+  );
+  const hashArray = Array.from(new Uint8Array(signature));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Seamlessly rotates the encryption key for a field.
+ * Decrypts with old master key and re-encrypts with new master key using a fresh random IV.
+ */
+export async function rotateEncryptedField(
+  ciphertext: string,
+  oldMasterKeyBase64: string,
+  newMasterKeyBase64: string,
+  options?: DecryptFieldOptions
+): Promise<string | null> {
+  const decrypted = await decryptField(ciphertext, oldMasterKeyBase64, options);
+  if (decrypted === null || decrypted === undefined) return null;
+  const reEncrypted = await encryptField(decrypted, newMasterKeyBase64);
+  return reEncrypted ?? null;
+}

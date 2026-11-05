@@ -12,6 +12,9 @@ import {
   isLikelyEncryptedField,
   normalizePublicIdentifier,
   verifyAuditLogChain,
+  computeBlindIndex,
+  rotateEncryptedField,
+  createCsv,
   type AuditLogVerificationRecord,
   type D1DatabaseLike,
 } from '../dist/index.js';
@@ -166,4 +169,51 @@ test('createTextPdf and createStoredMultiZip produce valid binary outputs', () =
   const multiView = new DataView(multiZip.buffer, multiZip.byteOffset, multiZip.byteLength);
   // Total entries in central directory (offset -22 + 8)
   assert.equal(multiView.getUint16(multiZip.byteLength - 22 + 8, true), 2);
+});
+
+test('computeBlindIndex and rotateEncryptedField support searchable FLE and key rotation', async () => {
+  const blindKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
+  const newMasterKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(8)));
+
+  // Blind index deterministic hashing
+  const idx1 = await computeBlindIndex('user@example.com', blindKey);
+  const idx2 = await computeBlindIndex(' USER@EXAMPLE.COM ', blindKey);
+  assert.equal(idx1, idx2);
+  assert.match(idx1!, /^[a-f0-9]{64}$/);
+
+  const idxDiff = await computeBlindIndex('other@example.com', blindKey);
+  assert.notEqual(idx1, idxDiff);
+
+  // Key rotation
+  const original = 'Confidential Patient Record';
+  const oldCipher = await encryptField(original, masterKey);
+  assert.ok(oldCipher);
+
+  const rotated = await rotateEncryptedField(oldCipher, masterKey, newMasterKey);
+  assert.ok(rotated);
+  assert.notEqual(rotated, oldCipher);
+
+  // Decrypt with new master key
+  assert.equal(await decryptField(rotated, newMasterKey), original);
+  // Old key can no longer decrypt rotated ciphertext
+  assert.equal(await decryptField(rotated, masterKey), null);
+});
+
+test('createCsv generates valid RFC 4180 CSV with optional BOM', () => {
+  const rows = [
+    ['Name', 'Age', 'Bio'],
+    ['Alice', 30, 'Hello, World!'],
+    ['Bob', 25, 'Line 1\nLine "2"'],
+  ];
+
+  const csv = createCsv(rows);
+  const text = new TextDecoder().decode(csv);
+  assert.ok(text.includes('"Hello, World!"'));
+  assert.ok(text.includes('"Line 1\nLine ""2"""'));
+  assert.equal(csv[0], 0x4e); // 'N'
+
+  const csvBom = createCsv(rows, { includeBom: true });
+  assert.equal(csvBom[0], 0xef);
+  assert.equal(csvBom[1], 0xbb);
+  assert.equal(csvBom[2], 0xbf);
 });

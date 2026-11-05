@@ -130,7 +130,15 @@ const ciphertext = await encryptField('MY-SECRET-SSN-123', masterKey);
 // If the DB field still contains legacy plaintext, it safely falls back to plaintext.
 const value = await decryptField(dbValue, masterKey, { allowLegacyPlaintext: true });
 
-// 3. Normalize identifiers (handles encrypted tokens or legacy alphanumeric keys interchangeably)
+// 3. Searchable Encryption (Blind Indexing)
+// Compute deterministic salted HMAC-SHA256 index to allow WHERE email_bindex = ? queries without exposing plaintext
+const blindIndex = await computeBlindIndex('user@example.com', env.BLIND_INDEX_KEY);
+
+// 4. Zero-Downtime Key Rotation
+// Rotate existing ciphertext from old key to new key with a fresh random IV
+const rotatedCiphertext = await rotateEncryptedField(ciphertext, oldMasterKey, newMasterKey);
+
+// 5. Normalize identifiers (handles encrypted tokens or legacy alphanumeric keys interchangeably)
 const cleanId = await normalizePublicIdentifier(incomingParam, masterKey);
 ```
 
@@ -184,6 +192,25 @@ return new Response(zipBytes, {
   headers: {
     'Content-Type': 'application/zip',
     'Content-Disposition': 'attachment; filename="bundle.zip"',
+  },
+});
+```
+
+#### Generating RFC 4180 CSV Reports (Excel-Ready)
+
+```typescript
+import { createCsv } from 'edge-audit-crypto';
+
+const csvBytes = createCsv([
+  ['ID', 'Name', 'Status'],
+  [1, 'Alice, M.D.', 'Active'],
+  [2, 'Bob "Chief"', 'Pending'],
+], { includeBom: true }); // includes UTF-8 BOM so Excel opens it without mojibake
+
+return new Response(csvBytes, {
+  headers: {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="export.csv"',
   },
 });
 ```

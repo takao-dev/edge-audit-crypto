@@ -1,0 +1,75 @@
+{
+  "name": "edge-audit-crypto",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers / D1 / Edge security toolkit: optimistic CAS tamper-evident audit hash chains, zero-downtime AES-256-GCM field-level encryption (FLE), and zero-dependency PDF/ZIP generators.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "default": "./dist/crypto.js"
+    },
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "default": "./dist/audit.js"
+    },
+    "./auditVerifier": {
+      "types": "./dist/auditVerifier.d.ts",
+      "default": "./dist/auditVerifier.js"
+    },
+    "./pdf": {
+      "types": "./dist/simplePdf.d.ts",
+      "default": "./dist/simplePdf.js"
+    },
+    "./zip": {
+      "types": "./dist/simpleZip.d.ts",
+      "default": "./dist/simpleZip.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.ts",
+    "prepack": "npm run build"
+  },
+  "sideEffects": false,
+  "keywords": [
+    "cloudflare-workers",
+    "cloudflare-d1",
+    "d1",
+    "sqlite",
+    "audit-log",
+    "hash-chain",
+    "tamper-evident",
+    "cas",
+    "field-level-encryption",
+    "aes-gcm",
+    "pdf",
+    "zip",
+    "edge-computing"
+  ],
+  "author": "takaodev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/takaodev/edge-audit-crypto.git"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

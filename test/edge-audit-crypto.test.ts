@@ -199,18 +199,25 @@ test('computeBlindIndex and rotateEncryptedField support searchable FLE and key 
   assert.equal(await decryptField(rotated, masterKey), null);
 });
 
-test('createCsv generates valid RFC 4180 CSV with optional BOM', () => {
+test('createCsv generates valid RFC 4180 CSV with optional BOM and formula injection defense', () => {
   const rows = [
-    ['Name', 'Age', 'Bio'],
-    ['Alice', 30, 'Hello, World!'],
-    ['Bob', 25, 'Line 1\nLine "2"'],
+    ['Name', 'Age', 'Bio', 'FormulaInjection'],
+    ['Alice', 30, 'Hello, World!', '=1+1'],
+    ['Bob', 25, 'Line 1\nLine "2"', '@SUM(A1:A10)'],
   ];
 
   const csv = createCsv(rows);
   const text = new TextDecoder().decode(csv);
   assert.ok(text.includes('"Hello, World!"'));
   assert.ok(text.includes('"Line 1\nLine ""2"""'));
+  // Formula injection should be neutralized with prepended quote
+  assert.ok(text.includes("'=1+1"));
+  assert.ok(text.includes("'@SUM(A1:A10)"));
   assert.equal(csv[0], 0x4e); // 'N'
+
+  // When disabled
+  const rawCsv = createCsv([['=RAW']], { preventFormulaInjection: false });
+  assert.ok(new TextDecoder().decode(rawCsv).startsWith('=RAW'));
 
   const csvBom = createCsv(rows, { includeBom: true });
   assert.equal(csvBom[0], 0xef);

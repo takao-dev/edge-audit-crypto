@@ -68,11 +68,11 @@
     "zip",
     "edge-computing"
   ],
-  "author": "takaodev",
+  "author": "takao-dev",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/takaodev/edge-audit-crypto.git"
+    "url": "git+https://github.com/takao-dev/edge-audit-crypto.git"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

@@ -1,6 +1,6 @@
 # edge-audit-crypto
 
-[![CI](https://github.com/takaodev/edge-audit-crypto/actions/workflows/ci.yml/badge.svg)](https://github.com/takaodev/edge-audit-crypto/actions/workflows/ci.yml)
+[![CI](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/ci.yml/badge.svg)](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/edge-audit-crypto.svg)](https://www.npmjs.com/package/edge-audit-crypto)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -242,4 +242,4 @@ import { createStoredZip, createStoredMultiZip } from 'edge-audit-crypto/zip';
 
 ## License
 
-MIT © [takaodev](https://github.com/takaodev)
+MIT © [takao-dev](https://github.com/takao-dev)

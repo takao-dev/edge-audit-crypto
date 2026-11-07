@@ -1,6 +1,6 @@
 {
   "name": "edge-audit-crypto",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "Cloudflare Workers / D1 / Edge security toolkit: optimistic CAS tamper-evident audit hash chains, zero-downtime AES-256-GCM field-level encryption (FLE), and zero-dependency PDF/ZIP generators.",
   "type": "module",
   "main": "./dist/index.js",

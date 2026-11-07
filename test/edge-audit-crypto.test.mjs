@@ -15,8 +15,6 @@ import {
   computeBlindIndex,
   rotateEncryptedField,
   createCsv,
-  type AuditLogVerificationRecord,
-  type D1DatabaseLike,
 } from '../dist/index.js';
 
 const masterKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -62,34 +60,34 @@ test('optimistic CAS audit log append and PII-free chain verifier detect tamperi
     'genesis|10|update|undefined|undefined||'
   );
 
-  const rows: AuditLogVerificationRecord[] = [];
+  const rows = [];
   let nextId = 1;
-  const db: D1DatabaseLike = {
-    prepare(sql: string) {
-      let values: unknown[] = [];
+  const db = {
+    prepare(sql) {
+      let values = [];
       const statement = {
-        bind(...args: unknown[]) {
+        bind(...args) {
           values = args;
           return statement;
         },
-        async first<T>() {
+        async first() {
           if (sql.includes('SELECT "current_hash" AS current_hash')) {
             const facilityId = Number(values[0]);
             const row = [...rows].reverse().find((r) => r.facility_id === facilityId);
-            return (row ? { current_hash: row.current_hash } : null) as T | null;
+            return row ? { current_hash: row.current_hash } : null;
           }
           const currentHash = String(values[1]);
           const row = rows.find((r) => r.current_hash === currentHash);
-          return (row ? { id: row.id, created_at: row.created_at } : null) as T | null;
+          return row ? { id: row.id, created_at: row.created_at } : null;
         },
         async run() {
           const userId = Number(values[0]);
           const facilityId = Number(values[1]);
           const action = String(values[2]);
-          const targetTable = values[3] as string | null;
-          const targetId = values[4] as number | null;
-          const oldValue = values[5] as string | null;
-          const newValue = values[6] as string | null;
+          const targetTable = values[3];
+          const targetId = values[4];
+          const oldValue = values[5];
+          const newValue = values[6];
           const previousHash = String(values[7]);
           const currentHash = String(values[8]);
           const expectedPrevious =
@@ -97,7 +95,7 @@ test('optimistic CAS audit log append and PII-free chain verifier detect tamperi
           if (previousHash !== expectedPrevious) {
             return { meta: { changes: 0, last_row_id: 0 } };
           }
-          const row: AuditLogVerificationRecord = {
+          const row = {
             id: nextId++,
             user_id: userId,
             facility_id: facilityId,
@@ -179,7 +177,7 @@ test('computeBlindIndex and rotateEncryptedField support searchable FLE and key 
   const idx1 = await computeBlindIndex('user@example.com', blindKey);
   const idx2 = await computeBlindIndex(' USER@EXAMPLE.COM ', blindKey);
   assert.equal(idx1, idx2);
-  assert.match(idx1!, /^[a-f0-9]{64}$/);
+  assert.match(idx1, /^[a-f0-9]{64}$/);
 
   const idxDiff = await computeBlindIndex('other@example.com', blindKey);
   assert.notEqual(idx1, idxDiff);

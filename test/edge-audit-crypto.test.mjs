@@ -24,6 +24,7 @@ import {
   writeAuditLog,
   allowsLegacyPlaintextFields,
   generateRandomToken,
+  timingSafeEqual,
 } from '../dist/index.js';
 
 const masterKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -370,4 +371,83 @@ test('decryptField edge cases: null/undefined, short length, and invalid base64 
 
   // rotateEncryptedField on un-decryptable input
   assert.equal(await rotateEncryptedField('invalid_cipher_text', masterKey, masterKey), null);
+});
+
+test('timingSafeEqual constant time comparison and isLikelyEncryptedField error handling', async () => {
+  assert.equal(timingSafeEqual('hello', 'hello'), true);
+  assert.equal(timingSafeEqual('hello', 'world'), false);
+  assert.equal(timingSafeEqual('short', 'longer_string'), false);
+
+  // isLikelyEncryptedField with bad base64
+  assert.equal(isLikelyEncryptedField('!!!invalid base64???'), false);
+
+  // decryptField with >= 28 byte corrupted ciphertext and allowLegacyPlaintext: true
+  const dummy28Bytes = btoa('123456789012345678901234567890');
+  const fallback = await decryptField(dummy28Bytes, masterKey, { allowLegacyPlaintext: true });
+  assert.equal(fallback, dummy28Bytes);
+});
+
+test('audit log CAS conflict exhaustion and writeAuditLog error handlers', async () => {
+  // CAS retry exhaustion throws after 5 attempts
+  const conflictingDb = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            first: async () => ({ current_hash: 'genesis' }),
+            run: async () => ({ meta: { changes: 0 } }), // always conflict
+          };
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => appendAuditLog({ DB: conflictingDb }, 'usr_1', { facilityId: 'fac_1', action: 'CREATE' }),
+    /Could not append the audit chain for facility fac_1/i
+  );
+
+  // writeAuditLog with error in waitUntil
+  let loggedError = null;
+  const originalError = console.error;
+  console.error = (msg, err) => { loggedError = { msg, err }; };
+  try {
+    const errorDb = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => { throw new Error('DB connection failed'); },
+            };
+          },
+        };
+      },
+    };
+
+    const ctxWaitUntil = {
+      get: (k) => k === 'user' ? { id: 'usr_1' } : null,
+      env: { DB: errorDb },
+      executionCtx: {
+        waitUntil: (p) => p,
+      },
+    };
+    writeAuditLog(ctxWaitUntil, { facilityId: 'fac_err' });
+    await new Promise(r => setTimeout(r, 10));
+    assert.ok(loggedError);
+
+    // writeAuditLog with error in fallback
+    loggedError = null;
+    const ctxFallback = {
+      get: (k) => k === 'user' ? { id: 'usr_1' } : null,
+      env: { DB: errorDb },
+      get executionCtx() {
+        throw new Error('Access denied to executionCtx');
+      },
+    };
+    writeAuditLog(ctxFallback, { facilityId: 'fac_fallback_err' });
+    await new Promise(r => setTimeout(r, 10));
+    assert.ok(loggedError);
+  } finally {
+    console.error = originalError;
+  }
 });

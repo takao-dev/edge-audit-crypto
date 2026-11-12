@@ -235,7 +235,6 @@ test('createCsv generates valid RFC 4180 CSV with optional BOM and formula injec
 
 test('writeAuditLog handles execution context with and without waitUntil', async () => {
   let executedWaitUntil = false;
-  let executedDirect = false;
 
   const mockDb = {
     prepare: () => ({
@@ -251,9 +250,8 @@ test('writeAuditLog handles execution context with and without waitUntil', async
     get: (k) => (k === 'user' ? { id: 42 } : undefined),
     env: { DB: mockDb },
     executionCtx: {
-      waitUntil: (p) => {
+      waitUntil: (_p) => {
         executedWaitUntil = true;
-        p;
       },
     },
   };

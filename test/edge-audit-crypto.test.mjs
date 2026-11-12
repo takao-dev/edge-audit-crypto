@@ -21,6 +21,9 @@ import {
   computeBlindIndex,
   rotateEncryptedField,
   createCsv,
+  writeAuditLog,
+  allowsLegacyPlaintextFields,
+  generateRandomToken,
 } from '../dist/index.js';
 
 const masterKey = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -227,4 +230,144 @@ test('createCsv generates valid RFC 4180 CSV with optional BOM and formula injec
   assert.equal(csvBom[0], 0xef);
   assert.equal(csvBom[1], 0xbb);
   assert.equal(csvBom[2], 0xbf);
+});
+
+test('writeAuditLog handles execution context with and without waitUntil', async () => {
+  let executedWaitUntil = false;
+  let executedDirect = false;
+
+  const mockDb = {
+    prepare: () => ({
+      bind: () => ({
+        first: async () => ({ current_hash: 'genesis' }),
+        run: async () => ({ meta: { changes: 1, last_row_id: 1 } }),
+      }),
+    }),
+  };
+
+  // 1. With waitUntil
+  const ctxWithWait = {
+    get: (k) => (k === 'user' ? { id: 42 } : undefined),
+    env: { DB: mockDb },
+    executionCtx: {
+      waitUntil: (p) => {
+        executedWaitUntil = true;
+        p;
+      },
+    },
+  };
+  writeAuditLog(ctxWithWait, { facilityId: 1, action: 'test_action', targetTable: 'Users' });
+  assert.equal(executedWaitUntil, true);
+
+  // 2. Without waitUntil (fallback)
+  const ctxFallback = {
+    get: (k) => (k === 'user' ? { id: 42 } : undefined),
+    env: { DB: mockDb },
+  };
+  writeAuditLog(ctxFallback, { facilityId: 1, action: 'fallback_action', targetTable: 'Users' });
+
+  // 3. User missing (early return)
+  const ctxNoUser = {
+    get: () => undefined,
+    env: { DB: mockDb },
+  };
+  writeAuditLog(ctxNoUser, { facilityId: 1, action: 'ignored', targetTable: 'Users' });
+
+  // 4. FacilityId missing (early return)
+  writeAuditLog(ctxWithWait, { facilityId: 0, action: 'ignored', targetTable: 'Users' });
+
+  // 5. appendAuditLog without DB throws
+  await assert.rejects(
+    () => appendAuditLog({}, 42, { facilityId: 1, action: 'act', targetTable: 'T' }),
+    /D1 database binding is required/i
+  );
+});
+
+test('verifyAuditLogChain detects broken hash chains and malformed links', async () => {
+  // 1. Current hash mismatch
+  const tamperedLogs = [
+    {
+      id: 1,
+      user_id: 1,
+      facility_id: 10,
+      action: 'INIT',
+      created_at: new Date('2026-01-01'),
+      previous_hash: 'genesis',
+      current_hash: 'tampered-hash-that-does-not-match',
+    },
+  ];
+  const r1 = await verifyAuditLogChain(tamperedLogs);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.issues[0].kind, 'current-hash-mismatch');
+
+  // 2. Missing current_hash
+  const missingHashLogs = [
+    {
+      id: 1,
+      user_id: 1,
+      facility_id: 10,
+      action: 'INIT',
+      created_at: new Date('2026-01-01'),
+      previous_hash: 'genesis',
+      current_hash: null,
+    },
+  ];
+  const r2 = await verifyAuditLogChain(missingHashLogs);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.issues[0].kind, 'missing-current-hash');
+
+  // 3. Previous hash mismatch
+  const brokenPrevLogs = [
+    {
+      id: 1,
+      user_id: 1,
+      facility_id: 10,
+      action: 'INIT',
+      created_at: new Date('2026-01-01'),
+      previous_hash: 'broken-genesis',
+      current_hash: 'some-hash',
+    },
+  ];
+  const r3 = await verifyAuditLogChain(brokenPrevLogs);
+  assert.equal(r3.ok, false);
+  assert.ok(r3.issues.some((i) => i.kind === 'previous-hash-mismatch'));
+});
+
+test('decryptField edge cases: null/undefined, short length, and invalid base64 legacy fallback', async () => {
+  assert.equal(await decryptField(null, masterKey), null);
+  assert.equal(await decryptField(undefined, masterKey), undefined);
+
+  // Short base64 (< 28 bytes) with allowLegacyPlaintext
+  const shortB64 = btoa('short');
+  assert.equal(await decryptField(shortB64, masterKey, { allowLegacyPlaintext: true }), shortB64);
+  assert.equal(await decryptField(shortB64, masterKey, { allowLegacyPlaintext: false }), null);
+
+  // Corrupted base64 with allowLegacyPlaintext
+  const badB64 = '!!!not-valid-base64!!!';
+  assert.equal(await decryptField(badB64, masterKey, { allowLegacyPlaintext: true }), badB64);
+  assert.equal(await decryptField(badB64, masterKey, { allowLegacyPlaintext: false }), null);
+
+  // encryptField null/undefined
+  assert.equal(await encryptField(null, masterKey), null);
+  assert.equal(await encryptField(undefined, masterKey), undefined);
+
+  // allowsLegacyPlaintextFields
+  assert.equal(allowsLegacyPlaintextFields({ ALLOW_LEGACY_PLAINTEXT_FIELDS: 'true' }), true);
+  assert.equal(allowsLegacyPlaintextFields({ ALLOW_LEGACY_PLAINTEXT_FIELDS: 'false' }), false);
+  assert.equal(allowsLegacyPlaintextFields({}), false);
+
+  // normalizePublicIdentifier null / unencrypted
+  assert.equal(await normalizePublicIdentifier(null), null);
+  assert.equal(await normalizePublicIdentifier('plain-user-id'), 'plain-user-id');
+
+  // computeBlindIndex null/undefined
+  assert.equal(await computeBlindIndex(null, masterKey), null);
+  assert.equal(await computeBlindIndex(undefined, masterKey), undefined);
+
+  // generateRandomToken
+  const tok = generateRandomToken(16);
+  assert.equal(tok.length, 32);
+
+  // rotateEncryptedField on un-decryptable input
+  assert.equal(await rotateEncryptedField('invalid_cipher_text', masterKey, masterKey), null);
 });

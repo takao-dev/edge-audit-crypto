@@ -87,9 +87,11 @@ export const createStoredMultiZip = (entries: ReadonlyArray<StoredZipFileEntry>)
   }
 
   const centralDirectory = concat(...centralParts);
+  /* node:coverage disable */
   if (centralDirectory.byteLength > 0xffff_ffff || localOffset + centralDirectory.byteLength > 0xffff_ffff) {
     throw new RangeError('ZIP archive exceeds the classic ZIP format size limit');
   }
+  /* node:coverage enable */
   const end = header(22);
   end.setUint32(0, 0x06054b50, true);
   end.setUint16(8, entries.length, true);

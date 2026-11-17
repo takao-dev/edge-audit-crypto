@@ -495,3 +495,23 @@ test('audit log CAS conflict exhaustion and writeAuditLog error handlers', async
     console.error = originalError;
   }
 });
+
+test('validation guards for appendAuditLog, createTextPdf, and createStoredMultiZip', async () => {
+  const validDb = {
+    prepare: () => ({
+      bind: () => ({
+        first: async () => ({ current_hash: 'invalid-hash-head' }),
+        run: async () => ({ meta: { changes: 0, last_row_id: 0 } }),
+      }),
+    }),
+  };
+  const env = { DB: validDb };
+
+  await assert.rejects(() => appendAuditLog(env, 0, { facilityId: 1, action: 'A', targetTable: 'T' }), /Valid user and facility IDs/);
+  await assert.rejects(() => appendAuditLog(env, 1, { facilityId: 1, action: '', targetTable: 'T' }), /non-empty strings/);
+  await assert.rejects(() => appendAuditLog(env, 1, { facilityId: 1, action: 'A', targetTable: 'T' }), /unsupported hash format/);
+
+  assert.throws(() => createTextPdf(123, ['line']), /must be strings/);
+  assert.throws(() => createStoredMultiZip([{ filename: 123, content: 'a' }]), /string filename/);
+  assert.throws(() => createStoredMultiZip([{ filename: 'a'.repeat(65536), content: 'a' }]), /exceeds supported size limits/);
+});

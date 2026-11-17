@@ -11,6 +11,10 @@
 
 [English README is available here](./README.md)
 
+## 監査ログチェーンの互換性と移行
+
+- 新しい監査ログは、施設IDと明示的なnull値を含む正規化フィールドから `v2_` 付きSHA-256ハッシュを作成します。既存の旧形式レコードはチェーンの直前ハッシュとして引き継がれますが、旧シリアライズ形式は曖昧で独立検証できないため、このバージョンの `verifyAuditLogChain` は `legacy-hash-version` を報告します。アップグレード前に旧履歴と既存の検証証跡をエクスポート・保全し、v2区間を独立して検証する前に別の信頼経路でチェックポイントを記録してください。旧履歴のハッシュを書き換えても、その完全性は証明できません。
+
 ---
 
 ## 🚀 主な機能
@@ -163,6 +167,17 @@ return new Response(zipBytes, {
   },
 });
 ```
+
+---
+
+## 🔒 関連エッジセキュリティパッケージ群
+
+- [wasm-crypto-hash](https://github.com/takao-dev/wasm-crypto-hash): 超高速 WebAssembly & WebCrypto 暗号化スイート (SHA-2/3, BLAKE3, PQC, Argon2, TOTP, BIP-39)
+- [edge-rate-limiter](https://github.com/takao-dev/edge-rate-limiter): 外部依存ゼロの固定/スライド窓型レートリミッター（ソルト付き匿名化対応）
+- [edge-secure-token](https://github.com/takao-dev/edge-secure-token): タイミング攻撃耐性を持つ WebCrypto ベースの JWT & クレーム暗号化スイート
+- [edge-session-crypto](https://github.com/takao-dev/edge-session-crypto): AES-GCM と鍵ローテーションを備えたステートレス暗号化クッキーセッション管理
+- [zero-pii-redactor](https://github.com/takao-dev/zero-pii-redactor): ログ・AIプロンプト向けの超高速・ReDoSフリー PII マスキング＆匿名化ツール
+- [webcrypto-secure-storage](https://github.com/takao-dev/webcrypto-secure-storage): AES-GCM & HMAC による改ざん検知機能付きセキュアKVストレージ
 
 ---
 

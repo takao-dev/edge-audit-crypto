@@ -3,7 +3,7 @@ import { computeAuditLogCurrentHash, type AuditLogHashRecord } from './audit.js'
 export type AuditLogVerificationIssue = {
   facilityId: number;
   auditLogId: number;
-  kind: 'missing-current-hash' | 'previous-hash-mismatch' | 'current-hash-mismatch';
+  kind: 'missing-current-hash' | 'previous-hash-mismatch' | 'current-hash-mismatch' | 'legacy-hash-version';
   message: string;
 };
 
@@ -19,16 +19,11 @@ export type AuditLogVerificationRecord = AuditLogHashRecord & {
   created_at: Date | string;
 };
 
-const compareRecords = (left: AuditLogVerificationRecord, right: AuditLogVerificationRecord) => {
-  const createdAtComparison =
-    new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
-  return createdAtComparison || left.id - right.id;
-};
+const compareRecords = (left: AuditLogVerificationRecord, right: AuditLogVerificationRecord) => left.id - right.id;
 
 /**
  * Verifies facility-scoped audit chains without exposing PII in the result.
- * Records are ordered by created_at and then id to make same-timestamp rows
- * deterministic for exported D1 data.
+ * Records follow their database insertion IDs, matching append order.
  */
 export const verifyAuditLogChain = async (
   records: readonly AuditLogVerificationRecord[]
@@ -65,6 +60,12 @@ export const verifyAuditLogChain = async (
           kind: 'previous-hash-mismatch',
           message: 'previous_hash does not match the preceding audit log',
         });
+      }
+
+      if (!/^v2_[0-9a-f]{64}$/.test(record.current_hash)) {
+        issues.push({ facilityId, auditLogId: record.id, kind: 'legacy-hash-version', message: 'record uses the pre-v2 ambiguous hash format and cannot be independently verified' });
+        expectedPreviousHash = record.current_hash;
+        continue;
       }
 
       const expectedCurrentHash = await computeAuditLogCurrentHash(record);

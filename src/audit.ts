@@ -35,17 +35,21 @@ export type AuditLogHashRecord = {
 };
 
 export const buildAuditLogHashInput = (record: AuditLogHashRecord): string => {
-  const previousHash = record.previous_hash ?? 'genesis';
-  const targetTable = record.target_table ?? 'undefined';
-  const targetId = record.target_id ?? 'undefined';
-  const oldValue = record.old_value ?? '';
-  const newValue = record.new_value ?? '';
-
-  return `${previousHash}|${record.user_id}|${record.action}|${targetTable}|${targetId}|${oldValue}|${newValue}`;
+  return JSON.stringify([
+    'edge-audit-chain-v2',
+    record.previous_hash ?? 'genesis',
+    record.user_id,
+    record.facility_id,
+    record.action,
+    record.target_table ?? null,
+    record.target_id ?? null,
+    record.old_value ?? null,
+    record.new_value ?? null,
+  ]);
 };
 
-export const computeAuditLogCurrentHash = (record: AuditLogHashRecord): Promise<string> =>
-  computeHash(buildAuditLogHashInput(record));
+export const computeAuditLogCurrentHash = async (record: AuditLogHashRecord): Promise<string> =>
+  `v2_${await computeHash(buildAuditLogHashInput(record))}`;
 
 export type AuditLogWriteParams = {
   facilityId: number;
@@ -81,9 +85,17 @@ export async function appendAuditLog(
   if (!env.DB || typeof env.DB.prepare !== 'function') {
     throw new Error('D1 database binding is required for audit logging.');
   }
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(params.facilityId) || params.facilityId <= 0) {
+    throw new Error('Valid user and facility IDs are required for audit logging');
+  }
+  if (typeof params.action !== 'string' || !params.action || typeof params.targetTable !== 'string' || !params.targetTable) {
+    throw new Error('Audit action and target table must be non-empty strings');
+  }
 
   const oldValStr = serializeAuditValue(params.oldValue, params.valuesAreSerialized === true);
   const newValStr = serializeAuditValue(params.newValue, params.valuesAreSerialized === true);
+  const oldStoredValue = oldValStr || null;
+  const newStoredValue = newValStr || null;
 
   const appendStatement =
     'INSERT INTO "AuditLog" ' +
@@ -102,15 +114,18 @@ export async function appendAuditLog(
       .bind(params.facilityId)
       .first<{ current_hash: string | null }>();
 
-    const previousHash = lastLog?.current_hash || 'genesis';
+    const previousHash = lastLog?.current_hash ?? 'genesis';
+    if (previousHash !== 'genesis' && !/^v2_[0-9a-f]{64}$/.test(previousHash) && !/^[0-9a-f]{64}$/.test(previousHash)) {
+      throw new Error('Audit chain head has an unsupported hash format');
+    }
     const currentHash = await computeAuditLogCurrentHash({
       user_id: userId,
       facility_id: params.facilityId,
       action: params.action,
       target_table: params.targetTable,
       target_id: params.targetId,
-      old_value: oldValStr,
-      new_value: newValStr,
+      old_value: oldStoredValue,
+      new_value: newStoredValue,
       previous_hash: previousHash,
     });
 
@@ -121,8 +136,8 @@ export async function appendAuditLog(
         params.action,
         params.targetTable,
         params.targetId ?? null,
-        oldValStr || null,
-        newValStr || null,
+        oldStoredValue,
+        newStoredValue,
         previousHash,
         currentHash,
         params.facilityId,

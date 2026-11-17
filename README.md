@@ -1,9 +1,14 @@
 # edge-audit-crypto
 
+## Audit-chain compatibility and migration
+
+- New audit entries use a `v2_` SHA-256 hash over canonical fields, including the facility ID and explicit null values. Existing pre-v2 rows remain linked as the previous chain head, but `verifyAuditLogChain` reports them as `legacy-hash-version` because the older serialization is ambiguous and cannot be independently verified by this version. Export and preserve the old history and its existing verification evidence before upgrading; record a separately trusted checkpoint before treating the v2 segment as independently verifiable. Rewriting old hashes cannot prove the integrity of the old history.
+
+[![npm version](https://img.shields.io/npm/v/edge-audit-crypto.svg)](https://www.npmjs.com/package/edge-audit-crypto)
+[![npm downloads](https://img.shields.io/npm/dw/edge-audit-crypto.svg)](https://www.npmjs.com/package/edge-audit-crypto)
 [![CI](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/ci.yml/badge.svg)](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/takao-dev/edge-audit-crypto/branch/main/graph/badge.svg)](https://codecov.io/gh/takao-dev/edge-audit-crypto)
 [![CodeQL](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/codeql.yml/badge.svg)](https://github.com/takao-dev/edge-audit-crypto/actions/workflows/codeql.yml)
-[![npm version](https://img.shields.io/npm/v/edge-audit-crypto.svg)](https://www.npmjs.com/package/edge-audit-crypto)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 > **Zero-dependency, production-grade security and operational toolkit for Cloudflare Workers, Cloudflare D1 (SQLite), and Edge runtimes.**
@@ -239,6 +244,19 @@ import { createStoredZip, createStoredMultiZip } from 'edge-audit-crypto/zip';
 - **IV Generation**: Uses `crypto.getRandomValues(new Uint8Array(12))` for each encryption operation. Never reuses IVs.
 - **Hash Algorithm**: SHA-256 via Web Crypto API (`crypto.subtle.digest`).
 - **Zero-Dependency**: No external npm packages at runtime. Immune to supply chain dependency attacks.
+
+---
+
+## 🔒 Related Edge Security Packages
+
+Complementary zero-dependency, high-performance security modules for Edge runtimes, Cloudflare Workers, and modern Node.js:
+
+- [wasm-crypto-hash](https://github.com/takao-dev/wasm-crypto-hash): Ultra-fast WebAssembly & WebCrypto cryptographic suite (SHA-2/3, BLAKE3, PQC, Argon2, TOTP, BIP-39).
+- [edge-rate-limiter](https://github.com/takao-dev/edge-rate-limiter): Zero-dependency sliding-window & token-bucket rate limiter with Zero-PII keyed hashing.
+- [edge-secure-token](https://github.com/takao-dev/edge-secure-token): Zero-dependency, timing-safe WebCrypto JWT suite with field-level claims encryption.
+- [edge-session-crypto](https://github.com/takao-dev/edge-session-crypto): Stateless encrypted cookie session manager with AES-GCM and key rotation.
+- [zero-pii-redactor](https://github.com/takao-dev/zero-pii-redactor): High-speed, ReDoS-free PII redactor, tokenizer, and pseudonymizer for logs and AI prompts.
+- [webcrypto-secure-storage](https://github.com/takao-dev/webcrypto-secure-storage): Tamper-evident authenticated key-value storage with AES-GCM & HMAC.
 
 ---
 

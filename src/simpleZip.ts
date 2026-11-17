@@ -29,14 +29,30 @@ export interface StoredZipFileEntry {
 
 /** Creates a standards-compliant ZIP containing one or more uncompressed UTF-8 files. */
 export const createStoredMultiZip = (entries: ReadonlyArray<StoredZipFileEntry>): Uint8Array => {
+  if (!Array.isArray(entries) || entries.length > 65_535) throw new RangeError('ZIP requires at most 65535 entries');
   const encoder = new TextEncoder();
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
   let localOffset = 0;
+  const seenNames = new Set<string>();
+  let totalDataBytes = 0;
 
   for (const entry of entries) {
+    if (!entry || typeof entry.filename !== 'string' || (!((typeof entry.content === 'string') || entry.content instanceof Uint8Array))) {
+      throw new TypeError('ZIP entries require a string filename and string or Uint8Array content');
+    }
+    const namePath = entry.filename.replace(/\\/g, '/');
+    if (!namePath || namePath.startsWith('/') || /^[A-Za-z]:/.test(namePath) || /[\u0000-\u001f\u007f]/.test(namePath) || namePath.split('/').some((part: string) => part === '' || part === '.' || part === '..')) {
+      throw new Error('ZIP entry filenames must be safe relative paths');
+    }
+    if (seenNames.has(namePath)) throw new Error('ZIP entry filenames must be unique');
+    seenNames.add(namePath);
     const name = encoder.encode(entry.filename);
     const data = typeof entry.content === 'string' ? encoder.encode(entry.content) : entry.content;
+    totalDataBytes += data.byteLength;
+    if (name.byteLength > 65_535 || data.byteLength > 0xffff_ffff || localOffset > 0xffff_ffff || totalDataBytes > 100 * 1024 * 1024) {
+      throw new RangeError('ZIP entry or archive exceeds supported size limits');
+    }
     const checksum = crc32(data);
 
     const local = header(30 + name.length);
@@ -71,6 +87,9 @@ export const createStoredMultiZip = (entries: ReadonlyArray<StoredZipFileEntry>)
   }
 
   const centralDirectory = concat(...centralParts);
+  if (centralDirectory.byteLength > 0xffff_ffff || localOffset + centralDirectory.byteLength > 0xffff_ffff) {
+    throw new RangeError('ZIP archive exceeds the classic ZIP format size limit');
+  }
   const end = header(22);
   end.setUint32(0, 0x06054b50, true);
   end.setUint16(8, entries.length, true);

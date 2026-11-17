@@ -67,8 +67,15 @@ test('optimistic CAS audit log append and PII-free chain verifier detect tamperi
       new_value: null,
       previous_hash: null,
     }),
-    'genesis|10|update|undefined|undefined||'
+    '["edge-audit-chain-v2","genesis",10,1,"update",null,null,null,null]'
   );
+
+  const collisionA = { user_id: 10, facility_id: 1, action: 'u', target_table: 't', old_value: 'a|b', new_value: 'c' };
+  const collisionB = { user_id: 10, facility_id: 1, action: 'u', target_table: 't', old_value: 'a', new_value: 'b|c' };
+  assert.notEqual(buildAuditLogHashInput(collisionA), buildAuditLogHashInput(collisionB));
+  assert.notEqual(await computeAuditLogCurrentHash(collisionA), await computeAuditLogCurrentHash(collisionB));
+  assert.notEqual(await computeAuditLogCurrentHash(collisionA), await computeAuditLogCurrentHash({ ...collisionA, facility_id: 2 }));
+  assert.notEqual(buildAuditLogHashInput({ ...collisionA, old_value: null }), buildAuditLogHashInput({ ...collisionA, old_value: '' }));
 
   const rows = [];
   let nextId = 1;
@@ -146,9 +153,14 @@ test('optimistic CAS audit log append and PII-free chain verifier detect tamperi
   assert.equal(valid.total, 2);
   assert.equal(valid.facilities, 1);
   assert.equal(valid.issues.length, 0);
+  const timestampReordered = await verifyAuditLogChain(rows.map((row, index) => ({
+    ...row,
+    created_at: index === 0 ? '2030-01-01T00:00:00Z' : '2020-01-01T00:00:00Z',
+  })));
+  assert.equal(timestampReordered.ok, true);
 
   // Tamper middle log
-  const tampered = rows.map((r, i) => (i === 0 ? { ...r, current_hash: 'tampered' } : r));
+  const tampered = rows.map((r, i) => (i === 0 ? { ...r, current_hash: `v2_${'0'.repeat(64)}` } : r));
   const invalid = await verifyAuditLogChain(tampered);
   assert.equal(invalid.ok, false);
   assert.deepEqual(
@@ -158,12 +170,44 @@ test('optimistic CAS audit log append and PII-free chain verifier detect tamperi
   assert.ok(await computeAuditLogCurrentHash(rows[0]));
 });
 
+test('append starts the v2 chain after legacy history and reports that history as unverifiable', async () => {
+  const legacyHead = 'a'.repeat(64);
+  let values = [];
+  let insertedValues = [];
+  const DB = {
+    prepare(sql) {
+      const statement = {
+        bind(...args) { values = args; return statement; },
+        async first() {
+          return sql.includes('SELECT "current_hash" AS current_hash')
+            ? { current_hash: legacyHead }
+            : { id: 2, created_at: '2026-11-17T00:00:00Z' };
+        },
+        async run() { insertedValues = [...values]; return { meta: { changes: 1, last_row_id: 2 } }; },
+      };
+      return statement;
+    },
+  };
+  const appended = await appendAuditLog({ DB }, 1, { facilityId: 1, action: 'update', targetTable: 'users' });
+  assert.match(appended.current_hash, /^v2_[0-9a-f]{64}$/);
+  assert.equal(insertedValues.includes(legacyHead), true);
+  const result = await verifyAuditLogChain([
+    { id: 1, user_id: 1, facility_id: 1, action: 'create', target_table: 'users', previous_hash: 'genesis', current_hash: legacyHead, old_value: null, new_value: null, created_at: '' },
+    { id: 2, user_id: 1, facility_id: 1, action: 'update', target_table: 'users', previous_hash: legacyHead, current_hash: appended.current_hash, old_value: null, new_value: null, created_at: '' },
+  ]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.issues.map((issue) => issue.kind), ['legacy-hash-version']);
+});
+
 test('createTextPdf and createStoredMultiZip produce valid binary outputs', () => {
   const pdf = new TextDecoder().decode(createTextPdf('Report (June)', ['line 1', 'line 2']));
   assert.ok(pdf.startsWith('%PDF-1.4\n'));
   assert.ok(pdf.includes('(Report \\(June\\)) Tj'));
   assert.ok(pdf.includes('(line 1) Tj'));
   assert.ok(pdf.includes('%%EOF'));
+  const xrefOffset = Number(pdf.match(/startxref\n(\d+)/)?.[1]);
+  assert.equal(Buffer.from(pdf).subarray(xrefOffset, xrefOffset + 4).toString(), 'xref');
+  assert.throws(() => createTextPdf('日本語', ['line']), /printable ASCII only/i);
 
   const zip = createStoredZip('報告.txt', '123456789');
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
@@ -177,6 +221,8 @@ test('createTextPdf and createStoredMultiZip produce valid binary outputs', () =
   const multiView = new DataView(multiZip.buffer, multiZip.byteOffset, multiZip.byteLength);
   // Total entries in central directory (offset -22 + 8)
   assert.equal(multiView.getUint16(multiZip.byteLength - 22 + 8, true), 2);
+  assert.throws(() => createStoredZip('../escape.txt', 'x'), /safe relative paths/i);
+  assert.throws(() => createStoredMultiZip([{ filename: 'same.txt', content: '' }, { filename: 'same.txt', content: '' }]), /must be unique/i);
 });
 
 test('computeBlindIndex and rotateEncryptedField support searchable FLE and key rotation', async () => {
@@ -292,7 +338,7 @@ test('verifyAuditLogChain detects broken hash chains and malformed links', async
       action: 'INIT',
       created_at: new Date('2026-01-01'),
       previous_hash: 'genesis',
-      current_hash: 'tampered-hash-that-does-not-match',
+      current_hash: `v2_${'0'.repeat(64)}`,
     },
   ];
   const r1 = await verifyAuditLogChain(tamperedLogs);
@@ -324,7 +370,7 @@ test('verifyAuditLogChain detects broken hash chains and malformed links', async
       action: 'INIT',
       created_at: new Date('2026-01-01'),
       previous_hash: 'broken-genesis',
-      current_hash: 'some-hash',
+      current_hash: `v2_${'0'.repeat(64)}`,
     },
   ];
   const r3 = await verifyAuditLogChain(brokenPrevLogs);
@@ -386,7 +432,7 @@ test('timingSafeEqual constant time comparison and isLikelyEncryptedField error 
 });
 
 test('audit log CAS conflict exhaustion and writeAuditLog error handlers', async () => {
-  // CAS retry exhaustion throws after 5 attempts
+  // CAS retry exhaustion throws after 8 attempts
   const conflictingDb = {
     prepare() {
       return {
@@ -401,8 +447,8 @@ test('audit log CAS conflict exhaustion and writeAuditLog error handlers', async
   };
 
   await assert.rejects(
-    () => appendAuditLog({ DB: conflictingDb }, 'usr_1', { facilityId: 'fac_1', action: 'CREATE' }),
-    /Could not append the audit chain for facility fac_1/i
+    () => appendAuditLog({ DB: conflictingDb }, 1, { facilityId: 1, action: 'CREATE', targetTable: 'Children' }),
+    /Could not append the audit chain for facility 1/i
   );
 
   // writeAuditLog with error in waitUntil
@@ -423,26 +469,26 @@ test('audit log CAS conflict exhaustion and writeAuditLog error handlers', async
     };
 
     const ctxWaitUntil = {
-      get: (k) => k === 'user' ? { id: 'usr_1' } : null,
+      get: (k) => k === 'user' ? { id: 1 } : null,
       env: { DB: errorDb },
       executionCtx: {
         waitUntil: (p) => p,
       },
     };
-    writeAuditLog(ctxWaitUntil, { facilityId: 'fac_err' });
+    writeAuditLog(ctxWaitUntil, { facilityId: 1, action: 'CREATE', targetTable: 'Children' });
     await new Promise(r => setTimeout(r, 10));
     assert.ok(loggedError);
 
     // writeAuditLog with error in fallback
     loggedError = null;
     const ctxFallback = {
-      get: (k) => k === 'user' ? { id: 'usr_1' } : null,
+      get: (k) => k === 'user' ? { id: 1 } : null,
       env: { DB: errorDb },
       get executionCtx() {
         throw new Error('Access denied to executionCtx');
       },
     };
-    writeAuditLog(ctxFallback, { facilityId: 'fac_fallback_err' });
+    writeAuditLog(ctxFallback, { facilityId: 2, action: 'CREATE', targetTable: 'Children' });
     await new Promise(r => setTimeout(r, 10));
     assert.ok(loggedError);
   } finally {
